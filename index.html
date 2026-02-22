@@ -292,7 +292,7 @@ function App() {
   const fetchCardValue = async card => {
     const q=`${card.year?card.year+" ":""}${card.brand?card.brand+" ":""}${card.player}${card.cardNumber?" #"+card.cardNumber:""} PSA ${card.grade} eBay sold`;
     const prompt=`Search eBay completed/sold listings for: "${q}"\n\nReturn ONLY valid JSON (no markdown):\n{"estimatedValue":<number|null>,"recentSales":[{"date":"YYYY-MM-DD","price":<number>,"source":"eBay"}],"salesCount":<number>,"note":"<60 chars>"}\nIf no data: {"estimatedValue":null,"recentSales":[],"salesCount":0,"note":"No recent sales found"}`;
-    const res=await fetch("/.netlify/functions/proxy",{
+    const res=await fetch("/api/proxy",{
       method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,tools:[{type:"web_search_20250305",name:"web_search"}],messages:[{role:"user",content:prompt}]})
     });
