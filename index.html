@@ -95,14 +95,14 @@ body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-s
 .td-value { font-size: 13px; font-weight: 500; color: var(--gold); font-family: 'DM Mono', monospace; }
 .psa-badge { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 4px; font-family: 'Playfair Display', serif; font-weight: 700; font-size: 13px; }
 .psa-10 { background: rgba(76,175,130,0.15); color: #4CAF82; border: 1px solid rgba(76,175,130,0.3); }
-.psa-9 { background: rgba(201,168,76,0.12); color: var(--gold); border: 1px solid rgba(201,168,76,0.3); }
-.psa-8 { background: rgba(100,140,220,0.12); color: #7099DC; border: 1px solid rgba(100,140,220,0.3); }
+.psa-9  { background: rgba(201,168,76,0.12); color: var(--gold); border: 1px solid rgba(201,168,76,0.3); }
+.psa-8  { background: rgba(100,140,220,0.12); color: #7099DC; border: 1px solid rgba(100,140,220,0.3); }
 .psa-other { background: rgba(120,120,140,0.12); color: var(--text-dim); border: 1px solid var(--border); }
 .status-pill { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 20px; font-size: 9px; font-family: 'DM Mono', monospace; }
-.status-live { background: rgba(76,175,130,0.12); color: #4CAF82; border: 1px solid rgba(76,175,130,0.2); }
-.status-pending { background: rgba(201,168,76,0.1); color: var(--gold-dim); border: 1px solid rgba(201,168,76,0.2); }
+.status-live    { background: rgba(76,175,130,0.12); color: #4CAF82; border: 1px solid rgba(76,175,130,0.2); }
+.status-pending { background: rgba(201,168,76,0.1);  color: var(--gold-dim); border: 1px solid rgba(201,168,76,0.2); }
 .status-loading { background: rgba(100,140,220,0.1); color: #7099DC; border: 1px solid rgba(100,140,220,0.2); }
-.status-error { background: rgba(207,90,90,0.1); color: var(--red); border: 1px solid rgba(207,90,90,0.2); }
+.status-error   { background: rgba(207,90,90,0.1);  color: var(--red); border: 1px solid rgba(207,90,90,0.2); }
 .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
 .new-badge { display: inline-block; margin-left: 6px; background: var(--gold); color: #0D0F14; border-radius: 10px; font-size: 8px; padding: 1px 6px; font-family: 'DM Mono', monospace; font-weight: 700; vertical-align: middle; }
 .empty-state { padding: 50px 20px; text-align: center; }
@@ -162,7 +162,7 @@ body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-s
 .toast { background: var(--bg3); border: 1px solid rgba(201,168,76,0.45); border-radius: 8px; padding: 12px 16px; min-width: 220px; box-shadow: 0 8px 32px rgba(0,0,0,0.45); animation: toastIn 0.3s ease; pointer-events: all; }
 @keyframes toastIn { from{opacity:0;transform:translateX(40px)} to{opacity:1;transform:translateX(0)} }
 .toast-eyebrow { font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--gold-dim); font-family: 'DM Mono', monospace; margin-bottom: 3px; }
-.toast-card { font-size: 12px; font-weight: 500; color: var(--text); }
+.toast-card  { font-size: 12px; font-weight: 500; color: var(--text); }
 .toast-price { font-size: 18px; font-family: 'DM Mono', monospace; color: var(--gold); margin-top: 2px; }
 </style>
 </head>
@@ -213,8 +213,8 @@ If you cannot find it, return: {"error":"not found"}`;
 function getPsaClass(g) {
   const n = Number(g);
   if (n===10) return "psa-10";
-  if (n===9) return "psa-9";
-  if (n===8) return "psa-8";
+  if (n===9)  return "psa-9";
+  if (n===8)  return "psa-8";
   return "psa-other";
 }
 
@@ -241,30 +241,30 @@ const saleKey = s => s.date+"::"+s.price;
 
 // Simple localStorage wrapper (works in any browser)
 const store = {
-  get(k) { try { const v=localStorage.getItem(k); return v?JSON.parse(v):null; } catch(e){ return null; } },
-  set(k,v) { try { localStorage.setItem(k,JSON.stringify(v)); } catch(e){} },
+  get(k)    { try { const v=localStorage.getItem(k); return v?JSON.parse(v):null; } catch(e){ return null; } },
+  set(k,v)  { try { localStorage.setItem(k,JSON.stringify(v)); } catch(e){} },
   getRaw(k) { try { return localStorage.getItem(k)||null; } catch(e){ return null; } },
   setRaw(k,v){ try { localStorage.setItem(k,v); } catch(e){} },
 };
 
 function App() {
-  const [cards,setCards] = useState([]);
-  const [notifs,setNotifs] = useState([]);
+  const [cards,setCards]           = useState([]);
+  const [notifs,setNotifs]         = useState([]);
   const [showDrawer,setShowDrawer] = useState(false);
-  const [showModal,setShowModal] = useState(false);
-  const [form,setForm] = useState(EMPTY_FORM);
-  const [certNum,setCertNum] = useState("");
+  const [showModal,setShowModal]   = useState(false);
+  const [form,setForm]             = useState(EMPTY_FORM);
+  const [certNum,setCertNum]       = useState("");
   const [certStatus,setCertStatus] = useState(""); // loading | found | notfound | error
   const [loadingMap,setLoadingMap] = useState({});
-  const [updatingAll,setUpdAll] = useState(false);
-  const [progress,setProgress] = useState(0);
-  const [toasts,setToasts] = useState([]);
-  const [countdown,setCountdown] = useState(POLL_MS);
-  const [loaded,setLoaded] = useState(false);
+  const [updatingAll,setUpdAll]    = useState(false);
+  const [progress,setProgress]     = useState(0);
+  const [toasts,setToasts]         = useState([]);
+  const [countdown,setCountdown]   = useState(POLL_MS);
+  const [loaded,setLoaded]         = useState(false);
 
-  const cardsRef = useRef(cards);
+  const cardsRef  = useRef(cards);
   const notifsRef = useRef(notifs);
-  const updRef = useRef(updatingAll);
+  const updRef    = useRef(updatingAll);
   useEffect(()=>{ cardsRef.current=cards; },[cards]);
   useEffect(()=>{ notifsRef.current=notifs; },[notifs]);
   useEffect(()=>{ updRef.current=updatingAll; },[updatingAll]);
@@ -280,7 +280,7 @@ function App() {
     setLoaded(true);
   },[]);
 
-  const saveCards = useCallback(v=>{ setCards(v); store.set("cv-cards",v); },[]);
+  const saveCards  = useCallback(v=>{ setCards(v);  store.set("cv-cards",v);  },[]);
   const saveNotifs = useCallback(v=>{ setNotifs(v); store.set("cv-notifs",v); },[]);
 
   const addToast = useCallback((cardLabel,sale)=>{
@@ -292,7 +292,7 @@ function App() {
   const fetchCardValue = async card => {
     const q=`${card.year?card.year+" ":""}${card.brand?card.brand+" ":""}${card.player}${card.cardNumber?" #"+card.cardNumber:""} PSA ${card.grade} eBay sold`;
     const prompt=`Search eBay completed/sold listings for: "${q}"\n\nReturn ONLY valid JSON (no markdown):\n{"estimatedValue":<number|null>,"recentSales":[{"date":"YYYY-MM-DD","price":<number>,"source":"eBay"}],"salesCount":<number>,"note":"<60 chars>"}\nIf no data: {"estimatedValue":null,"recentSales":[],"salesCount":0,"note":"No recent sales found"}`;
-    const res=await fetch("/api/proxy",{
+    const res=await fetch("/.netlify/functions/proxy",{
       method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,tools:[{type:"web_search_20250305",name:"web_search"}],messages:[{role:"user",content:prompt}]})
     });
