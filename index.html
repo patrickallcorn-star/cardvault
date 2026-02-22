@@ -176,215 +176,48 @@ const POLL_MS = 6 * 60 * 60 * 1000;
 const PSA_GRADES = [10,9,8,7,6,5,4,3,2,1,"Auth"];
 const EMPTY_FORM = { player:"", year:"", brand:"", cardNumber:"", grade:10, quantity:1, pricePaid:"" };
 
-function getPsaClass(g) {
-  const n = Number(g);
-  if (n===10) return "psa-10";
-  if (n===9) return "psa-9";
-  if (n===8) return "psa-8";
-  return "psa-other";
-}
-
-const fmt$ = v => v!=null ? "$"+Number(v).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—";
-const fmtDate = iso => iso ? new Date(iso).toLocaleDateString("en-US",{month:"short",day:"numeric"}) : null;
-
-function timeAgo(iso) {
-  if (!iso) return "";
-  const m = Math.floor((Date.now()-new Date(iso))/60000);
-  if (m<1) return "Just now";
-  if (m<60) return m+"m ago";
-  const h = Math.floor(m/60);
-  if (h<24) return h+"h ago";
-  return Math.floor(h/24)+"d ago";
-}
-
-function fmtCountdown(ms) {
-  if (ms<=0) return "checking…";
-  const h=Math.floor(ms/3600000), m=Math.floor((ms%3600000)/60000), s=Math.floor((ms%60000)/1000);
-  return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
-}
-
-const saleKey = s => s.date+"::"+s.price;
-
-// Simple localStorage wrapper (works in any browser)
-const store = {
-  get(k) { try { const v=localStorage.getItem(k); return v?JSON.parse(v):null; } catch(e){ return null; } },
-  set(k,v) { try { localStorage.setItem(k,JSON.stringify(v)); } catch(e){} },
-  getRaw(k) { try { return localStorage.getItem(k)||null; } catch(e){ return null; } },
-  setRaw(k,v){ try { localStorage.setItem(k,v); } catch(e){} },
-};
-
-function SetupScreen({onSave}) {
-  const [key, setKey] = useState("");
-  const [err, setErr] = useState("");
-  const save = () => {
-    const k = key.trim();
-    if (!k.startsWith("sk-ant-")) { setErr("That doesn't look like a valid Anthropic key — it should start with sk-ant-"); return; }
-    store.setRaw("cv-apikey", k);
-    onSave(k);
-  };
-  return (
-    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:24,background:"var(--bg)"}}>
-      <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,width:"100%",maxWidth:440,padding:32}}>
-        <div style={{textAlign:"center",marginBottom:28}}>
-          <div style={{fontSize:40,marginBottom:12}}>🏆</div>
-          <div style={{fontFamily:"'Playfair Display',serif",fontSize:24,marginBottom:6}}>CardVault</div>
-          <div style={{fontSize:11,color:"var(--text-dim)",fontFamily:"'DM Mono',monospace",letterSpacing:"0.15em",textTransform:"uppercase"}}>PSA Collection Tracker</div>
-        </div>
-        <div style={{marginBottom:10,fontSize:13,color:"var(--text-dim)",lineHeight:1.7}}>
-          To look up eBay sale prices, CardVault needs your Anthropic API key. It's stored <strong style={{color:"var(--text)"}}>only on your device</strong> and never sent anywhere except Anthropic's servers.
-        </div>
-        <div style={{marginBottom:6,fontSize:9,letterSpacing:"0.15em",textTransform:"uppercase",color:"var(--text-dim)",fontFamily:"'DM Mono',monospace"}}>Anthropic API Key</div>
-        <input
-          className="form-input"
-          type="password"
-          placeholder="sk-ant-..."
-          value={key}
-          onChange={e=>{setKey(e.target.value);setErr("");}}
-          style={{marginBottom:8}}
-        />
-        {err && <div style={{fontSize:11,color:"var(--red)",marginBottom:10,fontFamily:"'DM Mono',monospace"}}>{err}</div>}
-        <button className="btn btn-gold" onClick={save} style={{width:"100%",padding:12,fontSize:13}}>Save & Launch CardVault</button>
-        <div style={{marginTop:14,fontSize:10,color:"var(--text-muted)",fontFamily:"'DM Mono',monospace",textAlign:"center",lineHeight:1.7}}>
-          Get a free key at console.anthropic.com → API Keys
-        </div>
-      </div>
-    </div>
-  );
-}
-
+async function lookupCert(certNum, setForm, setCertStatus) {
+  if (!certNum.trim()) return;
+  setCertStatus("loading");
+  try {
+    const prompt = `Look up PSA certificate number ${certNum} at psacard.com/cert/${certNum} and return the card details as JSON only, no markdown:
+{"player":"<name>","year":"<year>","brand":"<brand/set>","cardNumber":"<card number or empty>","grade":<grade as number or "Auth">}
+If you cannot find it, return: {"error":"not found"}`;
+    const res = await fetch("/api/proxy", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({
+        model:"claude-sonnet-4-20250514", max_tokens:300,
+        tools:[{type:"web_search_20250305",name:"web_search"}],
+        messages:[{role:"user",content:prompt}]
+      })
+    });
+    const data = await res.json();
+    const text = data.content.filter(b=>b.type==="text").map(b=>b.text).join("");
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error("No JSON");
+    const info = JSON.parse(m[0]);
+    if (info.error) { setCertStatus("notfound"); return; }
+    setForm(f=>({...f,
+      player: info.player || f.player,
+      year: info.year || f.year,
+      brand: info.brand || f.brand,
+      cardNumber: info.cardNumber || f.cardNumber,
+      grade: info.grade || f.grade,
+    }));
+    setCertStatus("found");
+  } catch(e) {
+    setCertStatus("error");
 function App() {
-  const [apiKey,setApiKey] = useState(()=>store.getRaw("cv-apikey"));
   const [cards,setCards] = useState([]);
   const [notifs,setNotifs] = useState([]);
   const [showDrawer,setShowDrawer] = useState(false);
   const [showModal,setShowModal] = useState(false);
   const [form,setForm] = useState(EMPTY_FORM);
-  const [loadingMap,setLoadingMap] = useState({});
-  const [updatingAll,setUpdAll] = useState(false);
-  const [progress,setProgress] = useState(0);
-  const [toasts,setToasts] = useState([]);
-  const [countdown,setCountdown] = useState(POLL_MS);
-  const [loaded,setLoaded] = useState(false);
-
-  const cardsRef = useRef(cards);
-  const notifsRef = useRef(notifs);
-  const updRef = useRef(updatingAll);
-  useEffect(()=>{ cardsRef.current=cards; },[cards]);
-  useEffect(()=>{ notifsRef.current=notifs; },[notifs]);
-  useEffect(()=>{ updRef.current=updatingAll; },[updatingAll]);
-
-  // Load
-  useEffect(()=>{
-    const c = store.get("cv-cards");
-    const n = store.get("cv-notifs");
-    const t = store.get("cv-poll");
-    if (c) setCards(c);
-    if (n) setNotifs(n);
-    if (t) setCountdown(Math.max(0, POLL_MS-(Date.now()-t)));
-    setLoaded(true);
-  },[]);
-
-  const saveCards = useCallback(v=>{ setCards(v); store.set("cv-cards",v); },[]);
-  const saveNotifs = useCallback(v=>{ setNotifs(v); store.set("cv-notifs",v); },[]);
-
-  const addToast = useCallback((cardLabel,sale)=>{
-    const id=Date.now()+Math.random();
-    setToasts(t=>[...t,{id,cardLabel,sale}]);
-    setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),5500);
-  },[]);
-
-  const fetchCardValue = async card => {
-    const q=`${card.year?card.year+" ":""}${card.brand?card.brand+" ":""}${card.player}${card.cardNumber?" #"+card.cardNumber:""} PSA ${card.grade} eBay sold`;
-    const prompt=`Search eBay completed/sold listings for: "${q}"\n\nReturn ONLY valid JSON (no markdown):\n{"estimatedValue":<number|null>,"recentSales":[{"date":"YYYY-MM-DD","price":<number>,"source":"eBay"}],"salesCount":<number>,"note":"<60 chars>"}\nIf no data: {"estimatedValue":null,"recentSales":[],"salesCount":0,"note":"No recent sales found"}`;
-    const res=await fetch("/api/proxy",{
-      method:"POST",headers:{"Content-Type":"application/json","x-api-key":store.getRaw("cv-apikey")||"","anthropic-version":"2023-06-01"},
-      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,tools:[{type:"web_search_20250305",name:"web_search"}],messages:[{role:"user",content:prompt}]})
-    });
-    const data=await res.json();
-    const text=data.content.filter(b=>b.type==="text").map(b=>b.text).join("");
-    const m=text.match(/\{[\s\S]*\}/);
-    if(!m) throw new Error("No JSON");
-    return JSON.parse(m[0]);
-  };
-
-  const processNewSales = useCallback((card,freshSales)=>{
-    const known=new Set((card.recentSales||[]).map(saleKey));
-    const newOnes=freshSales.filter(s=>!known.has(saleKey(s)));
-    if(!newOnes.length) return [];
-    const label=[card.year,card.brand,card.player].filter(Boolean).join(" ")+` PSA ${card.grade}`;
-    const ns=newOnes.map(sale=>({
-      id:`${card.id}-${saleKey(sale)}-${Date.now()}`,
-      cardId:card.id, cardLabel:label, sale,
-      previousValue:card.currentValue??null,
-      seenAt:new Date().toISOString(), read:false,
-    }));
-    ns.forEach(n=>addToast(n.cardLabel,n.sale));
-    return ns;
-  },[addToast]);
-
-  const updateCard = useCallback(async cardId=>{
-    setLoadingMap(m=>({...m,[cardId]:true}));
-    setCards(prev=>prev.map(c=>c.id===cardId?{...c,status:"loading"}:c));
-    try {
-      const card=cardsRef.current.find(c=>c.id===cardId);
-      const result=await fetchCardValue(card);
-      const freshSales=result.recentSales||[];
-      const newNs=processNewSales(card,freshSales);
-      if(newNs.length){ saveNotifs([...notifsRef.current,...newNs].slice(-150)); }
-      saveCards(cardsRef.current.map(c=>c.id===cardId?{
-        ...c,currentValue:result.estimatedValue,recentSales:freshSales,
-        salesNote:result.note,lastUpdated:new Date().toISOString(),
-        status:result.estimatedValue?"live":"error",
-      }:c));
-    } catch(_){
-      saveCards(cardsRef.current.map(c=>c.id===cardId?{...c,status:"error",salesNote:"Update failed"}:c));
-    }
-    setLoadingMap(m=>({...m,[cardId]:false}));
-  },[processNewSales,saveCards,saveNotifs]);
-
-  const updateAll = useCallback(async()=>{
-    if(updRef.current) return;
-    setUpdAll(true); setProgress(0);
-    const list=cardsRef.current;
-    for(let i=0;i<list.length;i++){
-      await updateCard(list[i].id);
-      setProgress(Math.round(((i+1)/list.length)*100));
-    }
-    const now=Date.now();
-    setCountdown(POLL_MS);
-    store.set("cv-poll",now);
-    setUpdAll(false); setProgress(0);
-  },[updateCard]);
-
-  // Countdown ticker
-  useEffect(()=>{
-    const t=setInterval(()=>setCountdown(c=>Math.max(0,c-1000)),1000);
-    return ()=>clearInterval(t);
-  },[]);
-
-  // Auto-poll trigger
-  useEffect(()=>{
-    if(countdown===0 && cardsRef.current.length>0 && !updRef.current) updateAll();
-  },[countdown,updateAll]);
-
-  const unread=notifs.filter(n=>!n.read).length;
-
-  const openDrawer=()=>{
-    setShowDrawer(true);
-    if(unread>0) setTimeout(()=>saveNotifs(notifsRef.current.map(n=>({...n,read:true}))),700);
-  };
-
-  const addCard=()=>{
-    if(!form.player.trim()) return;
-    const card={
-      id:Date.now().toString(),...form,
-      grade:isNaN(+form.grade)?form.grade:+form.grade,
-      quantity:+form.quantity||1,
-      pricePaid:form.pricePaid?+form.pricePaid:null,
-      currentValue:null,recentSales:[],lastUpdated:null,status:"pending",
-    };
-    saveCards([...cardsRef.current,card]);
-    setForm(EMPTY_FORM); setShowModal(false);
+  const [certNum,setCertNum] = useState("");
+  const [certStatus,setCertStatus] = useState(""); // loading | found | notfound | error
+    const res=await fetch("/.netlify/functions/proxy",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+    setForm(EMPTY_FORM); setCertNum(""); setCertStatus(""); setShowModal(false);
   };
 
   const removeCard=id=>{
@@ -398,267 +231,23 @@ function App() {
   const pnlPct=totalCost>0?(pnl/totalCost)*100:0;
 
   if(!loaded) return null;
-  if(!apiKey) return <SetupScreen onSave={k=>{setApiKey(k);}} />;
 
-  return (
-    <div className="app">
-      {/* Header */}
-      <header className="header">
-        <div className="header-brand">
-          <div className="brand-icon">🏆</div>
-          <div>
-            <div className="brand-title">CardVault</div>
-            <div className="brand-subtitle">PSA Collection Tracker</div>
-          </div>
-        </div>
-        <div className="header-actions">
-          {cards.length>0 && (
-            <div className="countdown-chip">
-              <span className="live-dot"/>
-              {fmtCountdown(countdown)}
-            </div>
-          )}
-          {cards.length>0 && (
-            <button className="btn btn-outline" onClick={updateAll} disabled={updatingAll}>
-              <span className={`refresh-icon ${updatingAll?"spinning":""}`}>↻</span>
-              {updatingAll?` ${progress}%`:" Update All"}
-            </button>
-          )}
-          <button className={`bell-btn ${unread>0?"has-unread":""}`} onClick={openDrawer} title="Sales alerts">
-            🔔
-            {unread>0 && <span className="bell-badge">{unread>99?"99+":unread}</span>}
-          </button>
-          <button className="btn btn-gold" onClick={()=>setShowModal(true)}>+ Add Card</button>
-          <button className="btn btn-ghost" title="Change API key" onClick={()=>{if(window.confirm("Reset your API key?")){store.setRaw("cv-apikey","");setApiKey(null);}}} style={{padding:"5px 8px",fontSize:13}}>⚙️</button>
-        </div>
-      </header>
-
-      <main className="main">
-        {updatingAll && (
-          <div className="progress-bar-wrap">
-            <div className="progress-bar" style={{width:progress+"%"}}/>
-          </div>
-        )}
-
-        {/* Stats */}
-        <div className="stats-grid">
-          <div className="stat-card">
-            <div className="stat-label">Portfolio Value</div>
-            <div className="stat-value gold">{totalValue>0?fmt$(totalValue):"—"}</div>
-            <div className="stat-sub">{cards.filter(c=>c.currentValue).length}/{cards.length} valued</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Total Invested</div>
-            <div className="stat-value">{totalCost>0?fmt$(totalCost):"—"}</div>
-            <div className="stat-sub">{cards.reduce((s,c)=>s+(c.quantity||1),0)} cards</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Total P&L</div>
-            <div className="stat-value" style={{color:pnl>=0?"var(--green)":"var(--red)"}}>
-              {totalCost>0?(pnl>=0?"+":"")+fmt$(pnl):"—"}
-            </div>
-            <div className="stat-sub" style={{color:pnl>=0?"var(--green)":"var(--red)"}}>
-              {totalCost>0?(pnlPct>=0?"+":"")+pnlPct.toFixed(1)+"%":"Add cost basis"}
-            </div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Sales Alerts</div>
-            <div className="stat-value" style={{color:unread>0?"var(--gold)":undefined}}>{notifs.length}</div>
-            <div className="stat-sub">{unread>0?unread+" unread":"All caught up"}</div>
-          </div>
-        </div>
-
-        {/* Table */}
-        <div className="section-header">
-          <div className="section-title">Collection</div>
-          <div className="section-line"/>
-        </div>
-        <div className="card-table">
-          {cards.length===0 ? (
-            <div className="empty-state">
-              <div className="empty-icon">🃏</div>
-              <div className="empty-title">No cards yet</div>
-              <div className="empty-sub">Add your first PSA graded card to get started</div>
-            </div>
-          ) : (
-            <div className="table-scroll">
-              <div className="table-head">
-                <div className="th">Card</div>
-                <div className="th">Brand</div>
-                <div className="th">Card #</div>
-                <div className="th">Grade</div>
-                <div className="th">Market Value</div>
-                <div className="th">Cost Basis</div>
-                <div className="th">Status</div>
-                <div className="th"/>
-              </div>
-              {cards.map(card=>{
-                const rowUnread=notifs.filter(n=>n.cardId===card.id&&!n.read).length;
-                return (
-                  <div className="table-row" key={card.id}>
-                    <div>
-                      <div className="card-name">
-                        {card.player}
-                        {rowUnread>0 && <span className="new-badge">{rowUnread} new</span>}
-                      </div>
-                      <div className="card-meta">{card.year}{card.quantity>1?` · ×${card.quantity}`:""}</div>
-                    </div>
-                    <div className="td">{card.brand||"—"}</div>
-                    <div className="td">{card.cardNumber||"—"}</div>
-                    <div><span className={`psa-badge ${getPsaClass(card.grade)}`}>{card.grade}</span></div>
-                    <div>
-                      <div className="td-value">{card.currentValue?fmt$(card.currentValue*(card.quantity||1)):"—"}</div>
-                      {card.currentValue&&card.quantity>1&&<div className="card-meta">{fmt$(card.currentValue)} each</div>}
-                      {card.salesNote&&<div className="card-meta" style={{fontSize:10,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={card.salesNote}>{card.salesNote}</div>}
-                    </div>
-                    <div>
-                      <div className="td">{card.pricePaid?fmt$(card.pricePaid*(card.quantity||1)):"—"}</div>
-                      {card.currentValue&&card.pricePaid&&(
-                        <div className="card-meta" style={{color:(card.currentValue-card.pricePaid)>=0?"var(--green)":"var(--red)"}}>
-                          {(card.currentValue-card.pricePaid)>=0?"+":""}{fmt$((card.currentValue-card.pricePaid)*(card.quantity||1))}
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      {loadingMap[card.id]||card.status==="loading"?(
-                        <span className="status-pill status-loading"><span className="dot"/>Fetching</span>
-                      ):card.status==="live"?(
-                        <div>
-                          <span className="status-pill status-live"><span className="dot"/>Live</span>
-                          {card.lastUpdated&&<div className="card-meta" style={{marginTop:3}}>{fmtDate(card.lastUpdated)}</div>}
-                        </div>
-                      ):card.status==="error"?(
-                        <span className="status-pill status-error"><span className="dot"/>Error</span>
-                      ):(
-                        <span className="status-pill status-pending"><span className="dot"/>Pending</span>
-                      )}
-                    </div>
-                    <div style={{display:"flex",gap:5}}>
-                      <button className="btn btn-ghost" onClick={()=>updateCard(card.id)} disabled={loadingMap[card.id]||updatingAll} title="Refresh" style={{padding:"3px 7px",fontSize:13}}>↻</button>
-                      <button className="btn btn-danger" onClick={()=>removeCard(card.id)}>✕</button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        <div className="alert alert-info">
-          🔔 CardVault checks for new eBay sales every 6 hours. New sales trigger bell alerts and pop-up toasts. Hit ↻ or "Update All" to check manually anytime.
-        </div>
-      </main>
-
-      {/* Notification Drawer */}
-      {showDrawer && (
-        <>
-          <div className="notif-overlay" onClick={()=>setShowDrawer(false)}/>
-          <div className="notif-drawer">
-            <div className="notif-header">
-              <div className="notif-title">Sales Alerts</div>
-              <div className="notif-hactions">
-                {notifs.length>0&&<>
-                  <button className="btn btn-ghost btn-xs" onClick={()=>saveNotifs(notifsRef.current.map(n=>({...n,read:true})))}>Mark read</button>
-                  <button className="btn btn-danger btn-xs" onClick={()=>saveNotifs([])}>Clear all</button>
-                </>}
-                <button className="btn btn-ghost btn-xs" onClick={()=>setShowDrawer(false)}>✕</button>
-              </div>
-            </div>
-            {notifs.length===0?(
-              <div className="notif-empty">
-                <div className="notif-empty-icon">🔔</div>
-                <div className="notif-empty-text">No sales alerts yet.<br/>New eBay sold listings that match your cards will appear here.</div>
-              </div>
-            ):(
-              <div className="notif-list">
-                {[...notifs].reverse().map(n=>(
-                  <div key={n.id} className={`notif-item ${n.read?"":"unread"}`}>
-                    <div className="notif-card-name">{n.cardLabel}</div>
-                    <div className="notif-price">{fmt$(n.sale.price)}</div>
-                    <div className="notif-meta">Sold {n.sale.date} · {n.sale.source}</div>
-                    {n.previousValue!=null&&(
-                      <div className="notif-vs">
-                        <div>
-                          <div className="notif-vs-label">Previous est.</div>
-                          <div className="notif-vs-val">{fmt$(n.previousValue)}</div>
-                        </div>
-                        <div>
-                          <div className="notif-vs-label">Difference</div>
-                          <div className="notif-vs-val" style={{color:n.sale.price>=n.previousValue?"var(--green)":"var(--red)"}}>
-                            {n.sale.price>=n.previousValue?"+":""}{fmt$(n.sale.price-n.previousValue)}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    <div className="notif-time">{timeAgo(n.seenAt)}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="notif-footer">Auto-checks every 6 hrs · Next in {fmtCountdown(countdown)}</div>
-          </div>
-        </>
-      )}
-
-      {/* Toasts */}
-      <div className="toast-wrap">
-        {toasts.map(t=>(
-          <div key={t.id} className="toast">
-            <div className="toast-eyebrow">🔔 New Sale Detected</div>
-            <div className="toast-card">{t.cardLabel}</div>
-            <div className="toast-price">{fmt$(t.sale.price)}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Add Card Modal */}
-      {showModal&&(
-        <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&setShowModal(false)}>
-          <div className="modal">
-            <div className="modal-header">
-              <div className="modal-title">Add PSA Card</div>
-              <button className="btn btn-ghost" onClick={()=>setShowModal(false)}>✕</button>
-            </div>
-            <div className="modal-body">
-              <div className="form-group">
-                <label className="form-label">Player / Card Name *</label>
-                <input className="form-input" placeholder="e.g. Michael Jordan" value={form.player} onChange={e=>setForm(f=>({...f,player:e.target.value}))}/>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="form-label">Year</label>
-                  <input className="form-input" placeholder="e.g. 1986" value={form.year} onChange={e=>setForm(f=>({...f,year:e.target.value}))}/>
+              <div className="form-group" style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:6,padding:14}}>
+                <label className="form-label" style={{color:"var(--gold)"}}>🔍 Lookup by PSA Cert Number</label>
+                <div style={{display:"flex",gap:8,marginTop:4}}>
+                  <input className="form-input" placeholder="e.g. 12345678" value={certNum}
+                    onChange={e=>{setCertNum(e.target.value);setCertStatus("");}}
+                    onKeyDown={e=>e.key==="Enter"&&lookupCert(certNum,setForm,setCertStatus)}
+                    style={{flex:1}}/>
+                  <button className="btn btn-outline" onClick={()=>lookupCert(certNum,setForm,setCertStatus)} disabled={certStatus==="loading"} style={{whiteSpace:"nowrap"}}>
+                    {certStatus==="loading"?"Looking up…":"Look Up"}
+                  </button>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Brand / Set</label>
-                  <input className="form-input" placeholder="e.g. Topps" value={form.brand} onChange={e=>setForm(f=>({...f,brand:e.target.value}))}/>
-                </div>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="form-label">Card Number</label>
-                  <input className="form-input" placeholder="e.g. 57" value={form.cardNumber} onChange={e=>setForm(f=>({...f,cardNumber:e.target.value}))}/>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">PSA Grade</label>
-                  <select className="form-select" value={form.grade} onChange={e=>setForm(f=>({...f,grade:e.target.value}))}>
-                    {PSA_GRADES.map(g=><option key={g} value={g}>PSA {g}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="form-label">Quantity</label>
-                  <input className="form-input" type="number" min="1" value={form.quantity} onChange={e=>setForm(f=>({...f,quantity:e.target.value}))}/>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Price Paid (per card)</label>
-                  <input className="form-input" type="number" placeholder="e.g. 150.00" value={form.pricePaid} onChange={e=>setForm(f=>({...f,pricePaid:e.target.value}))}/>
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-ghost" onClick={()=>setShowModal(false)}>Cancel</button>
+                {certStatus==="found" && <div style={{fontSize:11,color:"var(--green)",fontFamily:"DM Mono",marginTop:6}}>✓ Card details filled in below — review and add</div>}
+                {certStatus==="notfound" && <div style={{fontSize:11,color:"var(--red)",fontFamily:"DM Mono",marginTop:6}}>✗ Cert not found — try entering details manually</div>}
+                {certStatus==="error" && <div style={{fontSize:11,color:"var(--red)",fontFamily:"DM Mono",marginTop:6}}>✗ Lookup failed — try again or enter manually</div>}
+                <div style={{fontSize:10,color:"var(--text-muted)",fontFamily:"DM Mono",marginTop:6}}>Or fill in the details below manually</div>
+              <button className="btn btn-ghost" onClick={()=>{setShowModal(false);setCertNum("");setCertStatus("");}}>Cancel</button>
               <button className="btn btn-gold" onClick={addCard} disabled={!form.player.trim()}>Add to Collection</button>
             </div>
           </div>
